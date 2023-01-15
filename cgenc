@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+
+'''
+    cgenc - simple c generics generator for c
+    
+    author: Christophe TES
+    licence: MIT
+
+    # NOTES:
+        - [?] use aliases in generic template code: `@alias vec2T:vec2<T>`, to avoid use `< >`.
+        - [?] -o,--output=         - specifies the path of the output file, we can use `<type>` and `<tag>` symbols to define a output file format (default: file<tag>.ext)
+        - [?] -s,--single=         - specifies the path of the single file, the generated output will follow the order defined in the `@generic` declaration. (`output` argument will be ignored)
+'''
+
+import sys
+import os
+
+#-------------------------------------------------
+
+CGENC_VERSION = '0.1'
+GENERIC_TAG   = '@generic'
+
+# log colors
+BLACK   = '\033[30m'
+RED     = '\033[31m'
+GREEN   = '\033[32m'
+YELLOW  = '\033[33m'
+BLUE    = '\033[34m'
+MAGENTA = '\033[35m'
+CYAN    = '\033[36m'
+WHITE   = '\033[37m'
+DEFAULT = '\033[39m'
+
+#-------------------------------------------------
+
+def fatal(msg, fatal=True):
+    print(f'{MAGENTA}fatal:{DEFAULT} {msg}')
+    if fatal:
+        sys.exit(10)
+
+def error(msg):
+    print(f'{RED}error:{DEFAULT} {msg}')
+
+def warn(msg):
+    print(f'{YELLOW}warn:{DEFAULT} {msg}')
+
+def info(msg):
+    print(f'{GREEN}info:{DEFAULT} {msg}')
+
+def debug(msg):
+    print(f'{CYAN}debug:{DEFAULT} {msg}')
+
+def trace(msg):
+    print(f'{BLUE}trace:{DEFAULT} {msg}')
+
+def text(msg):
+    print(msg)
+
+#-------------------------------------------------
+
+def parse_gtype(gtype, refs):
+    # <ref, type, tag>
+    if gtype.startswith('<') and gtype.endswith('>'):
+        values = gtype[1:-1].split(',')
+        if len(values) >= 3:
+            ref, typ, tag = values
+            if ref in refs:
+                fatal('the reference `%s` is already exists in this group: %s' % (ref, str(gtype)))
+                return
+            else:
+                refs.append(ref)
+                item = (ref.upper().strip(), typ.strip(), tag.strip())
+                return item, refs
+        else:
+            fatal('generic type must be declared in this format `<ref, type, tag>`: `%s`' % str(gtype))
+
+def parse_group(group):
+    # [<gentype>, ...]
+    if group.startswith('[') and group.endswith(']'):
+        group = group[1:-1]
+        items, refs, pos = [], [], 0
+        while pos < len(group):
+            if group[pos] == '<':
+                beg = pos
+                while pos < len(group):
+                    if (group[pos] == '>'): break
+                    pos += 1
+                item = group[beg:pos+1].strip()
+                gtype, refs = parse_gtype(item, refs)
+                items.append(gtype)
+            pos += 1
+        return items
+
+def parse(src, decl=None):
+    if len(src):
+        # retrieves first line of template
+        fline = src.split('\n', 1)[0]
+
+        # overwrite decl
+        decl = ('@generic' + decl) if decl else fline
+
+        if decl.startswith(GENERIC_TAG):
+            groups = []
+            pos = len(GENERIC_TAG)
+
+            while pos < len(decl):
+                refs = []
+                # single
+                if decl[pos] == '<':
+                    beg = pos
+                    while pos < len(decl):
+                        if decl[pos] == '>': break
+                        pos += 1
+                    res, refs = parse_gtype(decl[beg:pos+1], refs)
+                    groups.append(res)
+                # multiple
+                elif decl[pos] == '[':
+                    beg = pos
+                    while pos < len(decl):
+                        if decl[pos] == ']': break
+                        pos += 1
+                    res = parse_group(decl[beg:pos+1])
+                    groups.append(res)
+                pos += 1
+
+            if len(groups) == 0:
+                error('no generic types declared')
+                return
+
+            # remove generic tag declaration line
+            if fline.startswith(GENERIC_TAG):
+                src = src[len(fline)+1:]
+
+            return (src, groups)
+        else:
+            fatal('c template must be started with `@generic` keyword with these parameters into single line')
+
+#-------------------------------------------------
+
+def replace_gtype(src, gtype):
+    # (ref, type, tag)
+    ref, typ, tag = gtype
+    src = src.replace('<%s>' % ref.upper(), typ).replace('<%s>' % ref.lower(), tag)
+    return src
+
+def translate(src, groups):
+    if len(src) and len(groups):
+        outputs = []
+        # for each group
+        for group in groups:
+            cpy = src
+            # single
+            if isinstance(group, tuple):
+                cpy = replace_gtype(cpy, group)
+            # multiple
+            else:
+                for gtype in group:
+                    cpy = replace_gtype(cpy, gtype)
+            outputs.append((group, cpy))
+        return outputs
+
+#------------------------------------------------- MAIN
+
+def usage():
+    print('cgenc v%s - simple C generics generator for C' % CGENC_VERSION + \
+'''
+
+usage:  cgenc [options] [inputs]
+
+inputs:                   - paths of the template files
+
+options:
+    -g,--generic=        - specifies the '@generic' declaration to use (template '@generic' declaration will be ignored)
+    -h,--help            - shows this help
+    -v,--version         - shows the version
+''')
+
+
+def parse_opt(opt, arg):
+    eq = arg.find('=')
+    val = arg[eq+1:] if eq > 0 else ''
+    return (opt, val)
+
+def main(args):
+    # parse args
+    if not len(args):
+        usage()
+    else:
+        # show help/version first
+        if any(arg in args for arg in ['-v', '--version']):
+            print('cgenc v%s' % CGENC_VERSION)
+            sys.exit(0)
+        if any(arg in args for arg in ['-h', '--help']):
+            usage()
+            sys.exit(0)
+            
+        # parse opts/srcs
+        opts = {}
+        inputs = []
+        for arg in args:
+            if arg.startswith('-'):
+                opt, val = '', ''
+                if arg.startswith('-g=') or arg.startswith('--generic='):
+                    opt, val = parse_opt('generic', arg)
+                if opt:
+                    if not opt in opts:
+                        opts[opt] = val
+                    else:
+                        fatal('the argument has already been used: %s' % arg)
+                else:
+                    fatal('unrecognized or incorrect argument: %s' % arg)
+            else:
+                inputs.append(arg)
+
+        if not len(inputs):
+            fatal('no input files was found')
+
+        # check if source files exists
+        err = 0
+        for inp in inputs:
+            if not os.path.isfile(inp):
+                error('unable to locate source file: %s' % inp)
+                err += 1
+        if err:
+            fatal('one or more source files were not found')
+
+        # parse and translate
+        for inp in inputs:
+            ifile = open(inp, 'r')
+            src = ifile.read()
+            ifile.close()
+
+            src, groups = parse(src, opts['generic'] if 'generic' in opts else '')
+            outputs = translate(src, groups)
+
+            if len(outputs):
+                name, ext = os.path.splitext(inp)
+                for outp in outputs:
+                    gtype, gtext = outp
+                    tag = gtype[2] if isinstance(gtype, tuple) else gtype[0][2]
+                    oname = name + tag + ext
+                    ofile = open(oname, 'w')
+                    ofile.write(gtext)
+                    ofile.close()
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
