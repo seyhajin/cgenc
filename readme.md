@@ -3,7 +3,7 @@
 Simple C generics generator for C.
 
 - Needs a generic template input file to be translated whose first line must start with `@generic` followed by the generic types we want to translate, separated by commas. 
-- The declaration of a generic type must follow the following format: `<ref, type, tag>` (ex: `<T, float, t>`). The translation process is simple, it replaces each occurrence of `<T>` (upper-case) by the **type** and `<t>` (lower-case) by the **tag** of which `T` is the reference (**ref**) of the generic type (noted the case difference).
+- The declaration of a generic type must follow the following format: `<ref, type, tag>` (ex: `<T, float, f>`). The translation process is simple, it replaces each occurrence of `<T>` (upper-case) by the **type** and `<t>` (lower-case) by the **tag** of which `T` is the reference (**ref**) of the generic type (noted the case difference).
 - Several generic types can be grouped together by putting them in square brackets and each reference must be unique.
 
 ## Usage
